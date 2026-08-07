@@ -1,0 +1,36 @@
+name: Deploy CloudVault to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            # Navigate to project directory
+            cd ~/CloudVault
+
+            # Pull latest code from GitHub
+            git pull origin main
+
+            # Rebuild and restart containers (only rebuilds changed layers)
+            docker compose up --build -d
+
+            # Remove old/unused Docker images to save disk space
+            docker image prune -f
+
+            # Show status
+            echo "=== Deployment Complete ==="
+            docker compose ps
