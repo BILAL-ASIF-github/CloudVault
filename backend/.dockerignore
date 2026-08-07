@@ -1,0 +1,6 @@
+node_modules
+npm-debug.log*
+cloudvault.db
+.env
+uploads/*
+!uploads/.gitkeep
