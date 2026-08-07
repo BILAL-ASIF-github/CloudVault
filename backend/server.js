@@ -81,16 +81,19 @@ async function checkAdmin(req, res, next) {
 // ==========================================
 
 app.post('/api/auth/register', async (req, res) => {
-  const { username, email, password } = req.body;
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'Missing registration details' });
+  const { username, email, password, first_name, last_name } = req.body;
+  // Support both: direct username OR first_name + last_name
+  const finalUsername = username || (first_name && last_name ? `${first_name} ${last_name}` : first_name || null);
+
+  if (!finalUsername || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Missing registration details' });
   }
 
   try {
     // Check if user already exists
-    const existing = await queryOne('SELECT id FROM users WHERE username = ? OR email = ?', [username, email]);
+    const existing = await queryOne('SELECT id FROM users WHERE username = ? OR email = ?', [finalUsername, email]);
     if (existing) {
-      return res.status(400).json({ error: 'Username or Email is already registered' });
+      return res.status(400).json({ success: false, message: 'Username or Email is already registered' });
     }
 
     // Hash password
@@ -104,34 +107,46 @@ app.post('/api/auth/register', async (req, res) => {
 
     const result = await query(
       'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
-      [username, email, hashedPassword, role]
+      [finalUsername, email, hashedPassword, role]
     );
 
     const newUserId = result.insertId;
     await logActivity(newUserId, 'REGISTER', `User created with role: ${role}`, req);
 
-    res.status(201).json({ message: 'User registered successfully', role });
+    // Sign JWT token so user is logged in immediately after registration
+    const token = jwt.sign(
+      { id: newUserId, username: finalUsername, email, role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully',
+      token,
+      user: { id: newUserId, username: finalUsername, email, role }
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
+    return res.status(400).json({ success: false, message: 'Email and password required' });
   }
 
   try {
     const user = await queryOne('SELECT * FROM users WHERE email = ?', [email]);
     if (!user) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+      return res.status(400).json({ success: false, message: 'Invalid email or password' });
     }
 
     const validPass = await bcrypt.compare(password, user.password);
     if (!validPass) {
-      return res.status(400).json({ error: 'Invalid email or password' });
+      return res.status(400).json({ success: false, message: 'Invalid email or password' });
     }
 
     // Sign JWT
@@ -144,23 +159,40 @@ app.post('/api/auth/login', async (req, res) => {
     await logActivity(user.id, 'LOGIN', 'Logged into dashboard', req);
 
     res.json({
+      success: true,
       token,
       user: { id: user.id, username: user.username, email: user.email, role: user.role }
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
     const user = await queryOne('SELECT id, username, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, user });
   } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
+});
+
+// Profile endpoint (alias for /me, used by frontend)
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await queryOne('SELECT id, username, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Logout endpoint (stateless JWT - just acknowledge)
+app.post('/api/auth/logout', (req, res) => {
+  res.json({ success: true, message: 'Logged out successfully' });
 });
 
 // ==========================================

@@ -203,7 +203,7 @@ export default function App() {
       }
       setAuthPassword('');
     } catch (err) {
-      triggerAlert('error', err.response?.data?.error || 'Authentication failed');
+      triggerAlert('error', err.response?.data?.message || err.response?.data?.error || 'Authentication failed');
     } finally {
       setAuthLoading(false);
     }
